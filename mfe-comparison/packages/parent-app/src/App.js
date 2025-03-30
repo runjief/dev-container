@@ -32,9 +32,15 @@ function App() {
       setCounter(prev => prev + 1);
     });
     
+    // Listen for child event notifications
+    bus.$on('child:event', (data) => {
+      console.log('Event from child:', data);
+    });
+    
     return () => {
       bus.$off('child:message');
       bus.$off('counter:increment');
+      bus.$off('child:event');
     };
   }, []);
   
@@ -52,7 +58,9 @@ function App() {
       degrade: testMode === 'iframe',
       props: {
         parentName: 'React Parent',
-        onEvent: (data) => console.log('Event from React child:', data)
+        // Don't pass functions directly as they can't be serialized
+        // Instead, use event-based communication
+        eventHandlerId: 'react-child-events'
       }
     });
   };
@@ -66,7 +74,8 @@ function App() {
       degrade: testMode === 'iframe',
       props: {
         parentName: 'React Parent',
-        onEvent: (data) => console.log('Event from Vue child:', data)
+        // Don't pass functions directly
+        eventHandlerId: 'vue-child-events'
       }
     });
   };

@@ -102,6 +102,18 @@ function ReactChildApp() {
     }
   };
   
+  // Instead of calling parent callback directly, emit an event
+  const sendEventToParent = () => {
+    if (mfe && mfe.bus) {
+      // Send event to parent
+      mfe.bus.$emit('child:event', {
+        source: 'React Child',
+        time: new Date().toLocaleTimeString(),
+        type: 'user-action'
+      });
+    }
+  };
+  
   // Communicate with Vue sibling
   const sendMessageToVueSibling = () => {
     if (mfe && mfe.bus) {
@@ -141,6 +153,9 @@ function ReactChildApp() {
           <div className="button-group">
             <button onClick={sendMessageToParent}>
               Send Message to Parent
+            </button>
+            <button onClick={sendEventToParent}>
+              Send Event to Parent
             </button>
             <button onClick={sendMessageToVueSibling}>
               Send Message to Vue Sibling
