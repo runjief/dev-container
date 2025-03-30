@@ -1,0 +1,17 @@
+{
+  "name": "mfe-comparison",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:*",
+    "dev:parent": "cd packages/parent-app && npm run start",
+    "dev:react-child": "cd packages/react-child && npm run start",
+    "dev:vue-child": "cd packages/vue-child && npm run dev"
+  },
+  "devDependencies": {
+    "npm-run-all": "^4.1.5"
+  }
+}
