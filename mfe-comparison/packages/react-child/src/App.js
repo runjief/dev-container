@@ -40,6 +40,7 @@ function ReactChildApp() {
   const [parentCounter, setParentCounter] = useState(0);
   const [localCounter, setLocalCounter] = useState(0);
   const [parentMessage, setParentMessage] = useState('');
+  const [vueMessage, setVueMessage] = useState('');
   
   useEffect(() => {
     // Subscribe to local state changes
@@ -57,14 +58,14 @@ function ReactChildApp() {
       
       // Listen for events from parent
       mfe.bus.$on('parent:action', (message) => {
+        console.log('React Child: Received message from parent:', message);
         setParentMessage(message);
       });
       
       // Listen for events from Vue sibling
       mfe.bus.$on('vue-to-react', (message) => {
-        console.log('Message from Vue sibling:', message);
-        // Display message via alert (just for demo purposes)
-        alert(`Message from Vue sibling: ${message}`);
+        console.log('React Child: Received message from Vue sibling:', message);
+        setVueMessage(message);
       });
       
       // Get initial parent state if available
@@ -98,7 +99,9 @@ function ReactChildApp() {
   // Send message to parent
   const sendMessageToParent = () => {
     if (mfe && mfe.bus) {
-      mfe.bus.$emit('child:message', `Hello from React Child (${new Date().toLocaleTimeString()})`);
+      const message = `Hello from React Child (${new Date().toLocaleTimeString()})`;
+      console.log('React Child: Sending message to parent:', message);
+      mfe.bus.$emit('child:message', message);
     }
   };
   
@@ -106,18 +109,22 @@ function ReactChildApp() {
   const sendEventToParent = () => {
     if (mfe && mfe.bus) {
       // Send event to parent
-      mfe.bus.$emit('child:event', {
+      const eventData = {
         source: 'React Child',
         time: new Date().toLocaleTimeString(),
         type: 'user-action'
-      });
+      };
+      console.log('React Child: Sending event to parent:', eventData);
+      mfe.bus.$emit('child:event', eventData);
     }
   };
   
   // Communicate with Vue sibling
   const sendMessageToVueSibling = () => {
     if (mfe && mfe.bus) {
-      mfe.bus.$emit('react-to-vue', `Message from React sibling (${new Date().toLocaleTimeString()})`);
+      const message = `Message from React sibling (${new Date().toLocaleTimeString()})`;
+      console.log('React Child: Sending message to Vue sibling:', message);
+      mfe.bus.$emit('react-to-vue', message);
     }
   };
   
@@ -148,6 +155,12 @@ function ReactChildApp() {
           {parentMessage && (
             <div className="message">
               <p><strong>From Parent:</strong> {parentMessage}</p>
+            </div>
+          )}
+          
+          {vueMessage && (
+            <div className="message">
+              <p><strong>From Vue Sibling:</strong> {vueMessage}</p>
             </div>
           )}
           

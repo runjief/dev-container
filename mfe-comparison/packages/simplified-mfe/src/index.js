@@ -27,10 +27,12 @@ export class EventBus {
     this.allEvents = this.events._all || [];
     
     // Store events back in registry
-    window.__MFE_EVENT_REGISTRY.set(this.id, this.events);
+    window.__MFE_EVENT_REGISTRY.set(id, this.events);
     
     // Store all events under _all key
     this.events._all = this.allEvents;
+    
+    console.log(`[EventBus:${id}] Created event bus`);
   }
 
   // Listen for a specific event
@@ -40,6 +42,7 @@ export class EventBus {
     }
     if (!this.events[event].includes(callback)) {
       this.events[event].push(callback);
+      console.log(`[EventBus:${this.id}] Registered handler for event: ${event}`);
     }
     return this;
   }
@@ -55,9 +58,14 @@ export class EventBus {
   // Remove event listener
   $off(event, callback) {
     if (this.events[event]) {
-      const index = this.events[event].indexOf(callback);
-      if (index !== -1) {
-        this.events[event].splice(index, 1);
+      if (callback) {
+        const index = this.events[event].indexOf(callback);
+        if (index !== -1) {
+          this.events[event].splice(index, 1);
+        }
+      } else {
+        // If no callback provided, remove all handlers for this event
+        this.events[event] = [];
       }
     }
     return this;
@@ -75,40 +83,55 @@ export class EventBus {
   // Trigger an event
   $emit(event, ...args) {
     // Log for debugging
-    console.log(`[EventBus:${this.id}] Emitting event: ${event}`);
+    console.log(`[EventBus:${this.id}] Emitting event: ${event}`, args);
     
-    // Global handlers for this event from all buses
-    let handlers = [];
-    
-    // First, collect handlers from the global registry for this specific event
-    window.__MFE_EVENT_REGISTRY.forEach((events, busId) => {
-      // Include handlers from all buses
-      if (events[event]) {
-        handlers = handlers.concat(events[event]);
-      }
-    });
-    
-    // Execute handlers
-    handlers.forEach(handler => {
-      try {
-        handler(...args);
-      } catch (err) {
-        console.error(`Error executing handler for event ${event}:`, err);
-      }
-    });
+    // Execute local handlers first
+    if (this.events[event]) {
+      this.events[event].forEach(handler => {
+        try {
+          handler(...args);
+        } catch (err) {
+          console.error(`[EventBus:${this.id}] Error executing handler for event ${event}:`, err);
+        }
+      });
+    }
     
     // Execute "listen all" handlers
-    window.__MFE_EVENT_REGISTRY.forEach((events) => {
-      if (events._all) {
-        events._all.forEach(handler => {
-          try {
-            handler(event, ...args);
-          } catch (err) {
-            console.error(`Error executing "listen all" handler for event ${event}:`, err);
-          }
-        });
+    this.allEvents.forEach(handler => {
+      try {
+        handler(event, ...args);
+      } catch (err) {
+        console.error(`[EventBus:${this.id}] Error executing "listen all" handler for event ${event}:`, err);
       }
     });
+    
+    // Also broadcast to all other buses unless it's a state or private event
+    if (!event.startsWith('state:') && !event.startsWith('_')) {
+      window.__MFE_EVENT_REGISTRY.forEach((events, busId) => {
+        if (busId !== this.id) {
+          const handlers = events[event] || [];
+          const allHandlers = events._all || [];
+          
+          // Execute specific handlers
+          handlers.forEach(handler => {
+            try {
+              handler(...args);
+            } catch (err) {
+              console.error(`[EventBus:${this.id}->EventBus:${busId}] Error executing handler for event ${event}:`, err);
+            }
+          });
+          
+          // Execute "listen all" handlers
+          allHandlers.forEach(handler => {
+            try {
+              handler(event, ...args);
+            } catch (err) {
+              console.error(`[EventBus:${this.id}->EventBus:${busId}] Error executing "listen all" handler for event ${event}:`, err);
+            }
+          });
+        }
+      });
+    }
     
     return this;
   }
@@ -122,6 +145,125 @@ export class EventBus {
     return this;
   }
 }
+
+/**
+ * State management helper
+ */
+export class StateManager {
+  constructor(initialState = {}) {
+    this.state = initialState;
+    this.listeners = [];
+    this.bus = null;
+    this.name = null;
+  }
+  
+  /**
+   * Connect to event bus for sharing state between apps
+   */
+  connect(name, bus) {
+    this.name = name;
+    this.bus = bus;
+    
+    // Make sure to debounce state updates to avoid performance issues
+    const debouncedNotify = this.debounce(() => this.notifyListeners(), 20);
+    
+    // Listen for state updates from other apps
+    this.bus.$on(`state:update:${name}`, (newState) => {
+      console.log(`[StateManager:${name}] Received state update:`, newState);
+      this.state = { ...this.state, ...newState };
+      debouncedNotify();
+    });
+    
+    // Listen for state requests
+    this.bus.$on(`state:get:${name}`, () => {
+      console.log(`[StateManager:${name}] Received state request, broadcasting current state`);
+      // Broadcast current state
+      this.bus.$emit(`state:update:${name}`, this.state);
+    });
+    
+    // Request initial state from other instances
+    setTimeout(() => {
+      this.bus.$emit(`state:get:${name}`);
+    }, 50);
+    
+    return this;
+  }
+  
+  /**
+   * Get current state
+   */
+  getState() {
+    return this.state;
+  }
+  
+  /**
+   * Update state
+   */
+  setState(newState) {
+    const prevState = { ...this.state };
+    this.state = { ...this.state, ...newState };
+    
+    // Only notify if state actually changed
+    if (JSON.stringify(prevState) !== JSON.stringify(this.state)) {
+      // Notify all listeners
+      this.notifyListeners();
+      
+      // Broadcast state change if connected to bus
+      if (this.bus && this.name) {
+        console.log(`[StateManager:${this.name}] Broadcasting state update:`, newState);
+        this.bus.$emit(`state:update:${this.name}`, newState);
+      }
+    }
+    
+    return this.state;
+  }
+  
+  /**
+   * Subscribe to state changes
+   */
+  subscribe(listener) {
+    this.listeners.push(listener);
+    
+    // Immediately notify with current state
+    listener(this.state);
+    
+    // Return unsubscribe function
+    return () => {
+      this.listeners = this.listeners.filter(l => l !== listener);
+    };
+  }
+  
+  /**
+   * Notify all listeners
+   */
+  notifyListeners() {
+    this.listeners.forEach(listener => {
+      try {
+        listener(this.state);
+      } catch (err) {
+        console.error('Error notifying state listener:', err);
+      }
+    });
+  }
+  
+  /**
+   * Simple debounce implementation for state updates
+   */
+  debounce(func, wait) {
+    let timeout;
+    return function executedFunction(...args) {
+      const later = () => {
+        clearTimeout(timeout);
+        func(...args);
+      };
+      clearTimeout(timeout);
+      timeout = setTimeout(later, wait);
+    };
+  }
+}
+
+// Create global state for sharing between applications
+export const globalState = new StateManager({});
 
 // Create a main event bus instance
 export const bus = new EventBus('main');
@@ -262,7 +404,7 @@ class Sandbox {
     // Handle messages from iframe
     this.messageHandler = (event) => {
       // Only process messages from our iframe
-      if (event.source !== this.iframe.contentWindow) return;
+      if (!this.iframe || event.source !== this.iframe.contentWindow) return;
       
       const { type, event: eventName, payload, action, id } = event.data || {};
       console.log(`[Sandbox:${this.name}] Received message from iframe:`, event.data);
@@ -278,10 +420,19 @@ class Sandbox {
         if (this.degrade && this.iframe) {
           this.iframe.style.display = 'block';
         }
-      } else if (type === 'mfe-event') {
+        
+        // Also hide any loading indicators
+        this.hideLoading();
+      } else if (type === 'mfe-event' && eventName) {
         // Handle event emitted from child
-        console.log(`[Sandbox:${this.name}] Received event from child: ${eventName}`);
-        this.bus.$emit(eventName, ...(payload || []));
+        console.log(`[Sandbox:${this.name}] Received event from child: ${eventName}`, payload);
+        
+        // Emit to local event bus
+        if (Array.isArray(payload)) {
+          this.bus.$emit(eventName, ...payload);
+        } else {
+          this.bus.$emit(eventName, payload);
+        }
       } else if (type === 'mfe-lifecycle') {
         if (action === 'mounted') {
           console.log(`[Sandbox:${this.name}] Child app mounted`);
@@ -309,8 +460,18 @@ class Sandbox {
       
       // Also send to iframe
       if (this.iframe && this.iframe.contentWindow) {
-        console.log(`[Sandbox:${this.name}] Sending event to iframe: ${event}`);
+        console.log(`[Sandbox:${this.name}] Sending event to iframe: ${event}`, args);
         this.iframe.contentWindow.postMessage({
+          type: 'mfe-event',
+          event,
+          payload: args
+        }, '*');
+      }
+      
+      // Also send to shadow iframe if it exists
+      if (this.shadowIframe && this.shadowIframe.contentWindow) {
+        console.log(`[Sandbox:${this.name}] Sending event to shadow iframe: ${event}`, args);
+        this.shadowIframe.contentWindow.postMessage({
           type: 'mfe-event',
           event,
           payload: args
@@ -761,7 +922,7 @@ export function destroyApp(id) {
 }
 
 /**
- * Initialize child application in iframe
+ * Initialize child application in iframe - Fixed version
  */
 export function initChildApp({ mount, unmount, bootstrap }) {
   // Check if running in an iframe within the MFE framework
@@ -769,6 +930,11 @@ export function initChildApp({ mount, unmount, bootstrap }) {
   
   if (inIframe) {
     console.log('[Child App] Initializing as a child application');
+    
+    // Initialize event handlers storage if not existing
+    if (!window.__MFE_EVENT_HANDLERS) {
+      window.__MFE_EVENT_HANDLERS = new Map();
+    }
     
     // Set up message handler for cross-origin communication
     const messageHandler = (event) => {
@@ -786,26 +952,37 @@ export function initChildApp({ mount, unmount, bootstrap }) {
           props: props || {},
           bus: {
             $emit: (event, ...args) => {
-              console.log(`[Child:${id}] Emitting event to parent:`, event);
+              console.log(`[Child:${id}] Emitting event to parent:`, event, args);
               // Send event to parent via postMessage
               window.parent.postMessage({
                 type: 'mfe-event',
                 event,
                 payload: args
               }, '*');
+              
+              // Also execute any local handlers (for sibling communication)
+              const handlers = window.__MFE_EVENT_HANDLERS.get(event) || [];
+              handlers.forEach(handler => {
+                try {
+                  handler(...args);
+                } catch (err) {
+                  console.error(`[Child:${id}] Error executing local handler for event ${event}:`, err);
+                }
+              });
+              
+              return window.__MFE.bus;
             },
             $on: (event, callback) => {
               // Store callback for this event
-              if (!window.__MFE_EVENT_HANDLERS) {
-                window.__MFE_EVENT_HANDLERS = new Map();
-              }
-              
               if (!window.__MFE_EVENT_HANDLERS.has(event)) {
                 window.__MFE_EVENT_HANDLERS.set(event, []);
               }
               
-              window.__MFE_EVENT_HANDLERS.get(event).push(callback);
-              console.log(`[Child:${id}] Registered handler for event:`, event);
+              const handlers = window.__MFE_EVENT_HANDLERS.get(event);
+              if (!handlers.includes(callback)) {
+                handlers.push(callback);
+                console.log(`[Child:${id}] Registered handler for event:`, event);
+              }
               
               return window.__MFE.bus;
             },
@@ -816,17 +993,21 @@ export function initChildApp({ mount, unmount, bootstrap }) {
               }
               
               const callbacks = window.__MFE_EVENT_HANDLERS.get(event);
-              const index = callbacks.indexOf(callback);
-              
-              if (index !== -1) {
-                callbacks.splice(index, 1);
+              if (callback) {
+                const index = callbacks.indexOf(callback);
+                if (index !== -1) {
+                  callbacks.splice(index, 1);
+                }
+              } else {
+                // If no callback specified, remove all handlers for this event
+                window.__MFE_EVENT_HANDLERS.set(event, []);
               }
               
               return window.__MFE.bus;
             },
             $clear: () => {
               // Clear all event handlers
-              window.__MFE_EVENT_HANDLERS = new Map();
+              window.__MFE_EVENT_HANDLERS.clear();
               return window.__MFE.bus;
             }
           }
@@ -870,10 +1051,11 @@ export function initChildApp({ mount, unmount, bootstrap }) {
             detail: { props: window.__MFE.props }
           }));
         }
-      } else if (type === 'mfe-event' && window.__MFE_EVENT_HANDLERS) {
+      } else if (type === 'mfe-event' && eventName) {
         // Handle event from parent
         const handlers = window.__MFE_EVENT_HANDLERS.get(eventName) || [];
         console.log(`[Child] Received event "${eventName}" with ${handlers.length} handlers`);
+        
         handlers.forEach(handler => {
           try {
             handler(...(payload || []));
@@ -920,6 +1102,24 @@ export function initChildApp({ mount, unmount, bootstrap }) {
             event,
             payload: args
           }, '*');
+          
+          // Also execute any local handlers (for sibling communication)
+          const handlers = window.__MFE_EVENT_HANDLERS.get(event) || [];
+          handlers.forEach(handler => {
+            try {
+              handler(...args);
+            } catch (err) {
+              console.error(`[Child] Error executing local handler for event ${event}:`, err);
+            }
+          });
+          
+          return {
+            $emit: (...emitArgs) => window.parent.postMessage({
+              type: 'mfe-event',
+              event: emitArgs[0],
+              payload: emitArgs.slice(1)
+            }, '*')
+          };
         },
         $on: (event, callback) => {
           if (!window.__MFE_EVENT_HANDLERS) {
@@ -953,10 +1153,14 @@ export function initChildApp({ mount, unmount, bootstrap }) {
           }
           
           const callbacks = window.__MFE_EVENT_HANDLERS.get(event);
-          const index = callbacks.indexOf(callback);
-          
-          if (index !== -1) {
-            callbacks.splice(index, 1);
+          if (callback) {
+            const index = callbacks.indexOf(callback);
+            if (index !== -1) {
+              callbacks.splice(index, 1);
+            }
+          } else {
+            // If no callback provided, remove all
+            window.__MFE_EVENT_HANDLERS.set(event, []);
           }
           
           return {
@@ -977,122 +1181,3 @@ export function initChildApp({ mount, unmount, bootstrap }) {
     return null;
   }
 }
-
-/**
- * State management helper
- */
-export class StateManager {
-  constructor(initialState = {}) {
-    this.state = initialState;
-    this.listeners = [];
-    this.bus = null;
-    this.name = null;
-  }
-  
-  /**
-   * Connect to event bus for sharing state between apps
-   */
-  connect(name, bus) {
-    this.name = name;
-    this.bus = bus;
-    
-    // Make sure to debounce state updates to avoid performance issues
-    const debouncedNotify = this.debounce(() => this.notifyListeners(), 20);
-    
-    // Listen for state updates from other apps
-    this.bus.$on(`state:update:${name}`, (newState) => {
-      console.log(`[StateManager:${name}] Received state update:`, newState);
-      this.state = { ...this.state, ...newState };
-      debouncedNotify();
-    });
-    
-    // Listen for state requests
-    this.bus.$on(`state:get:${name}`, () => {
-      console.log(`[StateManager:${name}] Received state request, broadcasting current state`);
-      // Broadcast current state
-      this.bus.$emit(`state:update:${name}`, this.state);
-    });
-    
-    // Request initial state from other instances
-    setTimeout(() => {
-      this.bus.$emit(`state:get:${name}`);
-    }, 50);
-    
-    return this;
-  }
-  
-  /**
-   * Get current state
-   */
-  getState() {
-    return this.state;
-  }
-  
-  /**
-   * Update state
-   */
-  setState(newState) {
-    const prevState = { ...this.state };
-    this.state = { ...this.state, ...newState };
-    
-    // Only notify if state actually changed
-    if (JSON.stringify(prevState) !== JSON.stringify(this.state)) {
-      // Notify all listeners
-      this.notifyListeners();
-      
-      // Broadcast state change if connected to bus
-      if (this.bus && this.name) {
-        console.log(`[StateManager:${this.name}] Broadcasting state update:`, newState);
-        this.bus.$emit(`state:update:${this.name}`, newState);
-      }
-    }
-    
-    return this.state;
-  }
-  
-  /**
-   * Subscribe to state changes
-   */
-  subscribe(listener) {
-    this.listeners.push(listener);
-    
-    // Immediately notify with current state
-    listener(this.state);
-    
-    // Return unsubscribe function
-    return () => {
-      this.listeners = this.listeners.filter(l => l !== listener);
-    };
-  }
-  
-  /**
-   * Notify all listeners
-   */
-  notifyListeners() {
-    this.listeners.forEach(listener => {
-      try {
-        listener(this.state);
-      } catch (err) {
-        console.error('Error notifying state listener:', err);
-      }
-    });
-  }
-  
-  /**
-   * Simple debounce implementation for state updates
-   */
-  debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
-    };
-  }
-}
-
-// Create global state for sharing between applications
-export const globalState = new StateManager({});

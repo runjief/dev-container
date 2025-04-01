@@ -18,18 +18,34 @@
         </div>
       </div>
       
-      <!-- Other component parts... -->
+      <div class="communication-section">
+        <h3>Communication</h3>
+        
+        <div v-if="parentMessage" class="message">
+          <p><strong>From Parent:</strong> {{ parentMessage }}</p>
+        </div>
+        
+        <div v-if="reactMessage" class="message">
+          <p><strong>From React Sibling:</strong> {{ reactMessage }}</p>
+        </div>
+        
+        <div class="button-group">
+          <button @click="sendMessageToParent">
+            Send Message to Parent
+          </button>
+          <button @click="sendMessageToReactSibling">
+            Send Message to React Sibling
+          </button>
+        </div>
+      </div>
     </div>
     
-    <!-- More component parts... -->
+    <div class="props-display">
+      <h3>Props from Parent</h3>
+      <pre>{{ JSON.stringify(mfeProps, null, 2) }}</pre>
+    </div>
   </div>
 </template>
-*/
-
-
-
-
-
 
 <script>
 import { initChildApp, StateManager } from 'simplified-mfe';
@@ -89,11 +105,13 @@ export default {
       
       // Listen for events from parent
       this.mfe.bus.$on('parent:action', (message) => {
+        console.log('Vue Child: Received message from parent:', message);
         this.parentMessage = message;
       });
       
       // Listen for events from React sibling
       this.mfe.bus.$on('react-to-vue', (message) => {
+        console.log('Vue Child: Received message from React sibling:', message);
         this.reactMessage = message;
       });
       
@@ -120,17 +138,27 @@ export default {
     
     // Request parent to increment counter
     requestParentIncrement() {
-      this.mfe.bus.$emit('counter:increment');
+      if (this.mfe && this.mfe.bus) {
+        this.mfe.bus.$emit('counter:increment');
+      }
     },
     
     // Send message to parent
     sendMessageToParent() {
-      this.mfe.bus.$emit('child:message', `Hello from Vue Child (${new Date().toLocaleTimeString()})`);
+      if (this.mfe && this.mfe.bus) {
+        const message = `Hello from Vue Child (${new Date().toLocaleTimeString()})`;
+        console.log('Vue Child: Sending message to parent:', message);
+        this.mfe.bus.$emit('child:message', message);
+      }
     },
     
     // Communicate with React sibling
     sendMessageToReactSibling() {
-      this.mfe.bus.$emit('vue-to-react', `Message from Vue sibling (${new Date().toLocaleTimeString()})`);
+      if (this.mfe && this.mfe.bus) {
+        const message = `Message from Vue sibling (${new Date().toLocaleTimeString()})`;
+        console.log('Vue Child: Sending message to React sibling:', message);
+        this.mfe.bus.$emit('vue-to-react', message);
+      }
     }
   }
 }
