@@ -105,6 +105,23 @@ export class EventBus {
       }
     });
     
+    // Check for special cross-app events (react-to-vue, vue-to-react)
+    const isCrossAppEvent = event === 'react-to-vue' || event === 'vue-to-react';
+    
+    // Check for window-level handlers (for cross-app communication)
+    if (isCrossAppEvent && window.__MFE_EVENT_HANDLERS) {
+      const handlers = window.__MFE_EVENT_HANDLERS.get(event) || [];
+      console.log(`[EventBus:${this.id}] Broadcasting cross-app event "${event}" to ${handlers.length} global handlers`);
+      
+      handlers.forEach(handler => {
+        try {
+          handler(...args);
+        } catch (err) {
+          console.error(`[EventBus:${this.id}] Error executing global handler for event ${event}:`, err);
+        }
+      });
+    }
+    
     // Also broadcast to all other buses unless it's a state or private event
     if (!event.startsWith('state:') && !event.startsWith('_')) {
       window.__MFE_EVENT_REGISTRY.forEach((events, busId) => {
@@ -427,11 +444,47 @@ class Sandbox {
         // Handle event emitted from child
         console.log(`[Sandbox:${this.name}] Received event from child: ${eventName}`, payload);
         
-        // Emit to local event bus
+        // Check if it's a cross-app event
+        const isCrossAppEvent = eventName === 'react-to-vue' || eventName === 'vue-to-react';
+        
+        // For cross-app events, determine the target app
+        let targetApp = null;
+        if (isCrossAppEvent) {
+          if (eventName === 'react-to-vue') {
+            targetApp = 'vue-child';
+          } else if (eventName === 'vue-to-react') {
+            targetApp = 'react-child';
+          }
+        }
+        
+        // Regular local event bus emission
         if (Array.isArray(payload)) {
           this.bus.$emit(eventName, ...payload);
         } else {
           this.bus.$emit(eventName, payload);
+        }
+        
+        // For cross-app events, also send directly to target
+        if (isCrossAppEvent && targetApp) {
+          console.log(`[Sandbox:${this.name}] Redirecting cross-app event "${eventName}" to ${targetApp}`);
+          const targetSandbox = getSandboxById(targetApp);
+          
+          if (targetSandbox && targetSandbox.iframe && targetSandbox.iframe.contentWindow) {
+            targetSandbox.iframe.contentWindow.postMessage({
+              type: 'mfe-event',
+              event: eventName,
+              payload: payload
+            }, '*');
+          }
+          
+          // Also send to shadow iframe if it exists
+          if (targetSandbox && targetSandbox.shadowIframe && targetSandbox.shadowIframe.contentWindow) {
+            targetSandbox.shadowIframe.contentWindow.postMessage({
+              type: 'mfe-event',
+              event: eventName,
+              payload: payload
+            }, '*');
+          }
         }
       } else if (type === 'mfe-lifecycle') {
         if (action === 'mounted') {
@@ -982,6 +1035,25 @@ export function initChildApp({ mount, unmount, bootstrap }) {
               if (!handlers.includes(callback)) {
                 handlers.push(callback);
                 console.log(`[Child:${id}] Registered handler for event:`, event);
+                
+                // Process any pending events for this event type
+                if (window.__MFE_PENDING_EVENTS) {
+                  const pendingEvents = window.__MFE_PENDING_EVENTS.filter(pe => pe.event === event);
+                  if (pendingEvents.length > 0) {
+                    console.log(`[Child:${id}] Processing ${pendingEvents.length} pending events for "${event}"`);
+                    
+                    pendingEvents.forEach(pe => {
+                      try {
+                        callback(...(pe.payload || []));
+                      } catch (err) {
+                        console.error(`Error executing handler for pending event ${event}:`, err);
+                      }
+                    });
+                    
+                    // Remove processed events
+                    window.__MFE_PENDING_EVENTS = window.__MFE_PENDING_EVENTS.filter(pe => pe.event !== event);
+                  }
+                }
               }
               
               return window.__MFE.bus;
@@ -1056,13 +1128,70 @@ export function initChildApp({ mount, unmount, bootstrap }) {
         const handlers = window.__MFE_EVENT_HANDLERS.get(eventName) || [];
         console.log(`[Child] Received event "${eventName}" with ${handlers.length} handlers`);
         
-        handlers.forEach(handler => {
-          try {
-            handler(...(payload || []));
-          } catch (err) {
-            console.error(`Error executing handler for event ${eventName}:`, err);
+        // Special handling for cross-app events
+        const isCrossAppEvent = eventName === 'react-to-vue' || eventName === 'vue-to-react';
+        
+        // Get the current app ID
+        const currentAppId = window.__MFE && window.__MFE.id ? window.__MFE.id : 
+            (document.querySelector('[data-mfe-id]') ? document.querySelector('[data-mfe-id]').getAttribute('data-mfe-id') : null);
+        
+        console.log(`[Child:${currentAppId}] Processing event with ID check: ${currentAppId}`);
+        
+        // For cross-app events, check if this app should process it
+        const shouldProcess = !isCrossAppEvent || 
+          (eventName === 'react-to-vue' && currentAppId === 'vue-child') || 
+          (eventName === 'vue-to-react' && currentAppId === 'react-child');
+        
+        if (shouldProcess) {
+          console.log(`[Child:${currentAppId}] Processing event "${eventName}"`);
+          
+          handlers.forEach(handler => {
+            try {
+              handler(...(payload || []));
+            } catch (err) {
+              console.error(`Error executing handler for event ${eventName}:`, err);
+            }
+          });
+        } else {
+          console.log(`[Child:${currentAppId}] Ignoring event "${eventName}" (not intended for this app)`);
+        }
+      } else if (type === 'mfe-direct-event' && eventName) {
+        // This is a direct cross-app event with explicit targeting
+        const currentAppId = window.__MFE?.id;
+        
+        // Process only if this is the target app
+        if (currentAppId === targetApp) {
+          console.log(`[Child:${currentAppId}] Received direct event "${eventName}" intended for this app`);
+          
+          const handlers = window.__MFE_EVENT_HANDLERS?.get(eventName) || [];
+          
+          // Force execution of all handlers
+          handlers.forEach(handler => {
+            try {
+              console.log(`[Child:${currentAppId}] Executing handler for direct event "${eventName}"`);
+              handler(...(payload || []));
+            } catch (err) {
+              console.error(`Error executing handler for direct event ${eventName}:`, err);
+            }
+          });
+          
+          // If no handlers found, store the event for delayed execution
+          if (handlers.length === 0) {
+            console.log(`[Child:${currentAppId}] No handlers found for direct event "${eventName}", storing for delayed execution`);
+            
+            if (!window.__MFE_PENDING_EVENTS) {
+              window.__MFE_PENDING_EVENTS = [];
+            }
+            
+            window.__MFE_PENDING_EVENTS.push({
+              event: eventName,
+              payload,
+              timestamp: Date.now()
+            });
           }
-        });
+        } else {
+          console.log(`[Child:${currentAppId}] Ignoring direct event "${eventName}" intended for ${targetApp}`);
+        }
       } else if (type === 'mfe-lifecycle') {
         if (action === 'mount' && mount) {
           console.log('[Child] Received mount command');

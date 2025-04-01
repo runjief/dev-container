@@ -85,6 +85,8 @@ export default {
     });
     
     if (this.mfe) {
+      console.log('Vue Child: Setting up event listeners');
+      
       // Store props
       this.mfeProps = this.mfe.props;
       
@@ -109,11 +111,28 @@ export default {
         this.parentMessage = message;
       });
       
-      // Listen for events from React sibling
-      this.mfe.bus.$on('react-to-vue', (message) => {
+      // Define handler for React sibling events
+      const reactMessageHandler = (message) => {
         console.log('Vue Child: Received message from React sibling:', message);
         this.reactMessage = message;
-      });
+      };
+      
+      // Register the handler at window level to ensure cross-app communication
+      if (window.__MFE_EVENT_HANDLERS) {
+        if (!window.__MFE_EVENT_HANDLERS.has('react-to-vue')) {
+          window.__MFE_EVENT_HANDLERS.set('react-to-vue', []);
+        }
+        
+        // Make sure handler isn't registered multiple times
+        const existingHandlers = window.__MFE_EVENT_HANDLERS.get('react-to-vue');
+        if (!existingHandlers.some(h => h.toString() === reactMessageHandler.toString())) {
+          window.__MFE_EVENT_HANDLERS.get('react-to-vue').push(reactMessageHandler);
+          console.log('Vue Child: Registered react-to-vue handler at window level');
+        }
+      }
+      
+      // Also register at normal bus level
+      this.mfe.bus.$on('react-to-vue', reactMessageHandler);
       
       // Get initial parent state if available
       this.mfe.bus.$emit('state:get:main');
@@ -158,6 +177,16 @@ export default {
         const message = `Message from Vue sibling (${new Date().toLocaleTimeString()})`;
         console.log('Vue Child: Sending message to React sibling:', message);
         this.mfe.bus.$emit('vue-to-react', message);
+        
+        // Also try direct emit to ensure message delivery
+        if (window.parent) {
+          window.parent.postMessage({
+            type: 'mfe-direct-event',
+            event: 'vue-to-react',
+            payload: [message],
+            targetApp: 'react-child'
+          }, '*');
+        }
       }
     }
   }

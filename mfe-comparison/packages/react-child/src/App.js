@@ -49,6 +49,8 @@ function ReactChildApp() {
     });
     
     if (mfe && mfe.bus) {
+      console.log('React Child: Setting up event listeners');
+      
       // Listen for parent state updates
       mfe.bus.$on('state:update:main', (state) => {
         if (state.counter !== undefined) {
@@ -62,11 +64,28 @@ function ReactChildApp() {
         setParentMessage(message);
       });
       
-      // Listen for events from Vue sibling
-      mfe.bus.$on('vue-to-react', (message) => {
+      // Listen for events from Vue sibling - register at global bus level, not just MFE bus
+      const vueMessageHandler = (message) => {
         console.log('React Child: Received message from Vue sibling:', message);
         setVueMessage(message);
-      });
+      };
+      
+      // Register the handler at window level to ensure cross-app communication
+      if (window.__MFE_EVENT_HANDLERS) {
+        if (!window.__MFE_EVENT_HANDLERS.has('vue-to-react')) {
+          window.__MFE_EVENT_HANDLERS.set('vue-to-react', []);
+        }
+        
+        // Make sure handler isn't registered multiple times
+        const existingHandlers = window.__MFE_EVENT_HANDLERS.get('vue-to-react');
+        if (!existingHandlers.some(h => h.toString() === vueMessageHandler.toString())) {
+          window.__MFE_EVENT_HANDLERS.get('vue-to-react').push(vueMessageHandler);
+          console.log('React Child: Registered vue-to-react handler at window level');
+        }
+      }
+      
+      // Also register at normal bus level
+      mfe.bus.$on('vue-to-react', vueMessageHandler);
       
       // Get initial parent state if available
       mfe.bus.$emit('state:get:main');
@@ -125,6 +144,16 @@ function ReactChildApp() {
       const message = `Message from React sibling (${new Date().toLocaleTimeString()})`;
       console.log('React Child: Sending message to Vue sibling:', message);
       mfe.bus.$emit('react-to-vue', message);
+      
+      // Also try direct emit to ensure message delivery
+      if (window.parent) {
+        window.parent.postMessage({
+          type: 'mfe-direct-event',
+          event: 'react-to-vue',
+          payload: [message],
+          targetApp: 'vue-child'
+        }, '*');
+      }
     }
   };
   
