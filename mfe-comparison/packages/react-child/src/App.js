@@ -121,8 +121,9 @@ function ReactChildApp() {
     }
   };
   
+  // Return with explicit height and width styling to ensure proper rendering
   return (
-    <div className="react-child-app">
+    <div className="react-child-app" style={{ height: '100%', width: '100%', overflow: 'auto' }}>
       <h2>React Child Application</h2>
       
       <div className="state-display">
@@ -172,8 +173,41 @@ function ReactChildApp() {
   );
 }
 
+// Updated renderApp function with fixes for proper rendering
 function renderApp() {
-  const container = document.getElementById('root');
+  // First try to get the container from the main page
+  let container = document.getElementById('root');
+  
+  // If we're in a MFE environment and can't find the root element,
+  // create one to ensure we have somewhere to render
+  if (!container && window.__POWERED_BY_MFE) {
+    console.log('[React Child] Creating root element');
+    container = document.createElement('div');
+    container.id = 'root';
+    container.style.cssText = 'width: 100%; height: 100%; overflow: auto;';
+    document.body.appendChild(container);
+    
+    // Also add some base styles to ensure proper rendering in both iframe and web component modes
+    if (!document.getElementById('mfe-base-styles')) {
+      const styleEl = document.createElement('style');
+      styleEl.id = 'mfe-base-styles';
+      styleEl.textContent = `
+        html, body {
+          margin: 0;
+          padding: 0;
+          height: 100%;
+          width: 100%;
+          overflow: hidden;
+        }
+        #root {
+          height: 100%;
+          width: 100%;
+        }
+      `;
+      document.head.appendChild(styleEl);
+    }
+  }
+  
   if (container) {
     root = ReactDOM.createRoot(container);
     root.render(
@@ -181,6 +215,13 @@ function renderApp() {
         <ReactChildApp />
       </React.StrictMode>
     );
+    
+    // Signal to parent that component is rendered
+    if (window.__POWERED_BY_MFE && window.parent) {
+      window.parent.postMessage({ type: 'mfe-rendered', app: 'react-child' }, '*');
+    }
+  } else {
+    console.error('[React Child] Could not find or create root element');
   }
 }
 

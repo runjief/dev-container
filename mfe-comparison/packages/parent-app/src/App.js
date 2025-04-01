@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { startApp, bus, globalState } from 'simplified-mfe';
 import './App.css';
-
+import { createDiagnosticPanel } from 'simplified-mfe/src/diagnostic';
 // Main React component that hosts micro frontends
 function App() {
   const [counter, setCounter] = useState(0);
@@ -83,6 +83,9 @@ function App() {
   return (
     <div className="app-container">
       <h1>React Parent Application</h1>
+      <button onClick={() => window.mfeDiagnostic.createPanel()}>
+      Show MFE Diagnostic
+    </button>
       
       <div className="test-controls">
         <h2>Test Mode: {testMode === 'webcomponent' ? 'Web Component' : 'Iframe'}</h2>

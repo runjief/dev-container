@@ -1,5 +1,5 @@
 <template>
-  <div class="vue-child-app">
+  <div class="vue-child-app" style="height: 100%; width: 100%; overflow: auto;">
     <h2>Vue Child Application</h2>
     
     <div class="state-display">
@@ -18,34 +18,18 @@
         </div>
       </div>
       
-      <div class="communication-section">
-        <h3>Communication</h3>
-        
-        <div v-if="parentMessage" class="message">
-          <p><strong>From Parent:</strong> {{ parentMessage }}</p>
-        </div>
-        
-        <div v-if="reactMessage" class="message">
-          <p><strong>From React Sibling:</strong> {{ reactMessage }}</p>
-        </div>
-        
-        <div class="button-group">
-          <button @click="sendMessageToParent">
-            Send Message to Parent
-          </button>
-          <button @click="sendMessageToReactSibling">
-            Send Message to React Sibling
-          </button>
-        </div>
-      </div>
+      <!-- Other component parts... -->
     </div>
     
-    <div class="props-display">
-      <h3>Props from Parent</h3>
-      <pre>{{ JSON.stringify(mfeProps, null, 2) }}</pre>
-    </div>
+    <!-- More component parts... -->
   </div>
 </template>
+*/
+
+
+
+
+
 
 <script>
 import { initChildApp, StateManager } from 'simplified-mfe';
